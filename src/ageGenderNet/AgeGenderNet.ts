@@ -8,6 +8,7 @@ import { extractParamsFromWeigthMap } from './extractParamsFromWeigthMap';
 import { AgeAndGenderPrediction, Gender, NetOutput, NetParams } from './types';
 import { NeuralNetwork } from '../NeuralNetwork';
 import { NetInput, TNetInput, toNetInput } from '../dom';
+import { as1D, as2D } from '../ops/as';
 
 export class AgeGenderNet extends NeuralNetwork<NetParams> {
 
@@ -35,8 +36,8 @@ export class AgeGenderNet extends NeuralNetwork<NetParams> {
         ? this.faceFeatureExtractor.forwardInput(input)
         : input
 
-      const pooled = tf.avgPool(bottleneckFeatures, [7, 7], [2, 2], 'valid').as2D(bottleneckFeatures.shape[0], -1)
-      const age = fullyConnectedLayer(pooled, params.fc.age).as1D()
+      const pooled = as2D(tf.avgPool(bottleneckFeatures, [7, 7], [2, 2], 'valid'), bottleneckFeatures.shape[0], -1)
+      const age = as1D(fullyConnectedLayer(pooled, params.fc.age))
       const gender = fullyConnectedLayer(pooled, params.fc.gender)
       return { age, gender }
     })

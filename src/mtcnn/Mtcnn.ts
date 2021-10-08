@@ -1,4 +1,5 @@
 import * as tf from '@tensorflow/tfjs-core';
+import { cast } from '@tensorflow/tfjs-core';
 
 import { Point, Rect } from '../classes';
 import { FaceDetection } from '../classes/FaceDetection';
@@ -57,7 +58,7 @@ export class Mtcnn extends NeuralNetwork<NetParams> {
 
     const imgTensor = tf.tidy(() =>
       bgrToRgbTensor(
-        tf.expandDims(tf.browser.fromPixels(inputCanvas)).toFloat() as tf.Tensor4D
+        cast(tf.expandDims(tf.browser.fromPixels(inputCanvas)), 'float32') as tf.Tensor4D
       )
     )
 

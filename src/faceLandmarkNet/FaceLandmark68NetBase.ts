@@ -6,6 +6,8 @@ import { NetInput, TNetInput, toNetInput } from '../dom';
 import { FaceFeatureExtractorParams, TinyFaceFeatureExtractorParams } from '../faceFeatureExtractor/types';
 import { FaceProcessor } from '../faceProcessor/FaceProcessor';
 import { isEven } from '../utils';
+import { as1D, as2D } from '../ops/as';
+import { div, mul, sub } from '@tensorflow/tfjs-core';
 
 export abstract class FaceLandmark68NetBase<
   TExtractorParams extends FaceFeatureExtractorParams | TinyFaceFeatureExtractorParams
@@ -26,10 +28,10 @@ export abstract class FaceLandmark68NetBase<
 
     return tf.tidy(() => {
       const createInterleavedTensor = (fillX: number, fillY: number) =>
-        tf.stack([
+        as1D(as2D(tf.stack([
           tf.fill([68], fillX),
           tf.fill([68], fillY)
-        ], 1).as2D(1, 136).as1D()
+        ], 1), 1, 136))
 
       const getPadding = (batchIdx: number, cond: (w: number, h: number) => boolean): number => {
         const { width, height } = inputDimensions[batchIdx]
@@ -38,15 +40,16 @@ export abstract class FaceLandmark68NetBase<
       const getPaddingX = (batchIdx: number) => getPadding(batchIdx, (w, h) => w < h)
       const getPaddingY = (batchIdx: number) => getPadding(batchIdx, (w, h) => h < w)
 
-      const landmarkTensors = output
-        .mul(tf.fill([batchSize, 136], inputSize))
-        .sub(tf.stack(Array.from(Array(batchSize), (_, batchIdx) =>
-          createInterleavedTensor(
-            getPaddingX(batchIdx),
-            getPaddingY(batchIdx)
-          )
-        )))
-        .div(tf.stack(Array.from(Array(batchSize), (_, batchIdx) =>
+      const landmarkTensors = div(
+        sub(
+          mul(output, tf.fill([batchSize, 136], inputSize)),
+          tf.stack(Array.from(Array(batchSize), (_, batchIdx) =>
+            createInterleavedTensor(
+              getPaddingX(batchIdx),
+              getPaddingY(batchIdx)
+            )
+          ))),
+        tf.stack(Array.from(Array(batchSize), (_, batchIdx) =>
           createInterleavedTensor(
             inputDimensions[batchIdx].width,
             inputDimensions[batchIdx].height

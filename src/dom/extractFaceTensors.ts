@@ -2,6 +2,7 @@ import * as tf from '@tensorflow/tfjs-core';
 
 import { Rect } from '../classes';
 import { FaceDetection } from '../classes/FaceDetection';
+import { as3D } from '../ops/as';
 import { isTensor3D, isTensor4D } from '../utils';
 
 /**
@@ -38,7 +39,7 @@ export async function extractFaceTensors(
       .map(box => box.clipAtImageBorders(imgWidth, imgHeight))
 
     const faceTensors = boxes.map(({ x, y, width, height }) =>
-      tf.slice3d(imageTensor.as3D(imgHeight, imgWidth, numChannels), [y, x, 0], [height, width, numChannels])
+      tf.slice3d(as3D(imageTensor, imgHeight, imgWidth, numChannels), [y, x, 0], [height, width, numChannels])
     )
 
     return faceTensors

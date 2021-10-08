@@ -1,4 +1,5 @@
 import * as tf from '@tensorflow/tfjs-core';
+import { div } from '@tensorflow/tfjs-core';
 
 import { ConvParams, depthwiseSeparableConv } from '../common';
 import { NetInput, TNetInput, toNetInput } from '../dom';
@@ -50,7 +51,7 @@ export class TinyXception extends NeuralNetwork<TinyXceptionParams> {
     return tf.tidy(() => {
       const batchTensor = input.toBatchTensor(112, true)
       const meanRgb = [122.782, 117.001, 104.298]
-      const normalized = normalize(batchTensor, meanRgb).div(tf.scalar(256)) as tf.Tensor4D
+      const normalized = div(normalize(batchTensor, meanRgb), tf.scalar(256)) as tf.Tensor4D
 
       let out = tf.relu(conv(normalized, params.entry_flow.conv_in, [2, 2]))
       out = reductionBlock(out, params.entry_flow.reduction_block_0, false)

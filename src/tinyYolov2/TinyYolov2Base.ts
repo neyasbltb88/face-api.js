@@ -1,4 +1,5 @@
 import * as tf from '@tensorflow/tfjs-core';
+import { cast, div, expandDims, reshape, slice } from '@tensorflow/tfjs-core';
 
 import { BoundingBox } from '../classes/BoundingBox';
 import { Dimensions } from '../classes/Dimensions';
@@ -99,11 +100,11 @@ export class TinyYolov2Base extends NeuralNetwork<TinyYolov2NetParams> {
 
     return tf.tidy(() => {
 
-      let batchTensor = input.toBatchTensor(inputSize, false).toFloat()
+      let batchTensor = cast(input.toBatchTensor(inputSize, false), 'float32')
       batchTensor = this.config.meanRgb
         ? normalize(batchTensor, this.config.meanRgb)
         : batchTensor
-      batchTensor = batchTensor.div(tf.scalar(256)) as tf.Tensor4D
+      batchTensor = div(batchTensor, tf.scalar(256)) as tf.Tensor4D
 
       return this.config.withSeparableConvs
         ? this.runMobilenet(batchTensor, params as MobilenetParams)
@@ -121,7 +122,7 @@ export class TinyYolov2Base extends NeuralNetwork<TinyYolov2NetParams> {
 
     const netInput = await toNetInput(input)
     const out = await this.forwardInput(netInput, inputSize)
-    const out0 = tf.tidy(() => tf.unstack(out)[0].expandDims()) as tf.Tensor4D
+    const out0 = tf.tidy(() => expandDims(tf.unstack(out)[0])) as tf.Tensor4D
 
     const inputDimensions = {
       width: netInput.getInputWidth(0),
@@ -190,12 +191,12 @@ export class TinyYolov2Base extends NeuralNetwork<TinyYolov2NetParams> {
     const numBoxes = this.config.anchors.length
 
     const [boxesTensor, scoresTensor, classScoresTensor] = tf.tidy(() => {
-      const reshaped = outputTensor.reshape([numCells, numCells, numBoxes, this.boxEncodingSize])
+      const reshaped = reshape(outputTensor, [numCells, numCells, numBoxes, this.boxEncodingSize])
 
-      const boxes = reshaped.slice([0, 0, 0, 0], [numCells, numCells, numBoxes, 4])
-      const scores = reshaped.slice([0, 0, 0, 4], [numCells, numCells, numBoxes, 1])
+      const boxes = slice(reshaped, [0, 0, 0, 0], [numCells, numCells, numBoxes, 4])
+      const scores = slice(reshaped, [0, 0, 0, 4], [numCells, numCells, numBoxes, 1])
       const classScores = this.withClassScores
-        ? tf.softmax(reshaped.slice([0, 0, 0, 5], [numCells, numCells, numBoxes, this.config.classes.length]), 3)
+        ? tf.softmax(slice(reshaped, [0, 0, 0, 5], [numCells, numCells, numBoxes, this.config.classes.length]), 3)
         : tf.scalar(0)
       return [boxes, scores, classScores]
     })

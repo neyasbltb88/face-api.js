@@ -21,7 +21,7 @@ export default {
     commonjs({
       include: 'node_modules/**'
     })
-  ].concat(minify ? uglify() : []),
+  ].concat(minify ? [] : []),
   output: {
     extend: true,
     file: `dist/face-api${minify ? '.min' : ''}.js`,

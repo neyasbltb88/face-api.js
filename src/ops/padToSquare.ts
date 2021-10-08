@@ -1,4 +1,5 @@
 import * as tf from '@tensorflow/tfjs-core';
+import { cast } from '@tensorflow/tfjs-core';
 
 /**
  * Pads the smaller dimension of an image tensor with zeros, such that width === height.
@@ -42,7 +43,7 @@ export function padToSquare(
       paddingTensorAppend
     ]
       .filter(t => !!t)
-      .map((t: tf.Tensor) => t.toFloat()) as tf.Tensor4D[]
+      .map((t: tf.Tensor) => cast(t, 'float32')) as tf.Tensor4D[]
     return tf.concat(tensorsToStack, paddingAxis)
   })
 }
