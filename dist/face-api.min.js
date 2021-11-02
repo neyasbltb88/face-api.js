@@ -555,7 +555,7 @@
     }
     function isTypedArray(a) {
         return a instanceof Float32Array || a instanceof Int32Array ||
-            a instanceof Uint8Array;
+            a instanceof Uint8Array || a instanceof Uint8ClampedArray;
     }
     function bytesPerElement(dtype) {
         if (dtype === 'float32' || dtype === 'int32') {
@@ -602,7 +602,9 @@
         if (values instanceof Float32Array) {
             return 'float32';
         }
-        else if (values instanceof Int32Array || values instanceof Uint8Array) {
+        else if (values instanceof Int32Array
+            || values instanceof Uint8Array
+            || values instanceof Uint8ClampedArray) {
             return 'int32';
         }
         else if (isNumber$1(values)) {
@@ -5001,7 +5003,14 @@
     function _isNavigatorDefined() {
         return typeof navigator !== 'undefined' && navigator != null;
     }
+    let isMobileMockValue;
+    function mockIsMobile(value) {
+        isMobileMockValue = value;
+    }
     function isMobile(nav) {
+        if (isMobileMockValue !== undefined) {
+            return isMobileMockValue;
+        }
         if (nav || _isNavigatorDefined()) {
             if (!nav) {
                 nav = navigator;
@@ -5035,6 +5044,7 @@
 
     var device_util = /*#__PURE__*/Object.freeze({
         __proto__: null,
+        mockIsMobile: mockIsMobile,
         isMobile: isMobile,
         isBrowser: isBrowser$1
     });
@@ -8562,7 +8572,18 @@
         }
         else if (isImage || isVideo || isImageBitmap) {
             if (fromPixels2DContext == null) {
-                fromPixels2DContext = document.createElement('canvas').getContext('2d');
+                if (typeof document === 'undefined') {
+                    if (typeof OffscreenCanvas !== 'undefined' && typeof OffscreenCanvasRenderingContext2D !== 'undefined') {
+                        // @ts-ignore
+                        fromPixels2DContext = new OffscreenCanvas(1, 1).getContext('2d');
+                    }
+                    else {
+                        throw new Error('Cannot parse input in current context. Reason: OffscreenCanvas Context2D rendering is not supported.');
+                    }
+                }
+                else {
+                    fromPixels2DContext = document.createElement('canvas').getContext('2d');
+                }
             }
             fromPixels2DContext.canvas.width = width;
             fromPixels2DContext.canvas.height = height;
@@ -8924,7 +8945,7 @@
 
     /**
      * @license
-     * Copyright 2017 Google LLC. All Rights Reserved.
+     * Copyright 2021 Google LLC. All Rights Reserved.
      * Licensed under the Apache License, Version 2.0 (the "License");
      * you may not use this file except in compliance with the License.
      * You may obtain a copy of the License at
@@ -8938,6 +8959,8 @@
      * limitations under the License.
      * =============================================================================
      */
+    const NEW_AXIS = -2;
+    const SHRINK_AXIS = -1;
     function assertParamsValid(input, begin, size) {
         const inputRank = input.shape.length;
         assert(inputRank === begin.length, () => `Error in slice${inputRank}D: Length of begin ${begin} must ` +
@@ -9214,49 +9237,281 @@
         });
         return [begin_, size_];
     }
+    // Convert the slicing specification from a sparse representation to a dense
+    // representation. This means that all ellipses and newaxis are expanded out.
     function sliceInfo(xShape, begin, end, strides, beginMask, endMask, ellipsisMask, newAxisMask, shrinkAxisMask) {
-        // make a copy because it may be modified further down.
-        let $begin = begin.slice();
-        let $end = end.slice();
-        let $strides = strides;
+        let stridesNonNull;
         if (strides == null) {
-            $strides = new Array($begin.length);
+            stridesNonNull = new Array(begin.length);
+            stridesNonNull.fill(1);
         }
-        const ellipsisAxes = maskToAxes(ellipsisMask);
-        if (ellipsisAxes.length > 1) {
+        else {
+            stridesNonNull = strides;
+        }
+        // Only one non-zero bit is allowed in ellipsisMask, which means ellipsisMask
+        // is a power of 2. Use bit compares to ensure ellipsisMask is 0 or a power
+        // of 2. When i is a power of 2, i & (i - 1) is always 0.
+        // Also ref:
+        // https://stackoverflow.com/questions/600293/how-to-check-if-a-number-is-a-power-of-2
+        if (ellipsisMask != null && (ellipsisMask & (ellipsisMask - 1)) !== 0) {
             throw new Error('Multiple ellipses in slice is not allowed.');
         }
-        if (ellipsisMask !== 0 && newAxisMask !== 0) {
-            throw new Error('Using both ellipsisMask and newAxisMask is not yet supported.');
+        // Step 1: Account for ellipsis and new axis.
+        // Check for ellipsis and count how many non-newaxis there are after.
+        let ellipsisSeen = false;
+        const sparseSpec = {
+            dims: stridesNonNull.length,
+            numAddAxisAfterEllipsis: 0,
+            begin: begin.slice(),
+            end: end.slice(),
+            strides: stridesNonNull.slice(),
+            beginMask,
+            endMask,
+            ellipsisMask,
+            newAxisMask,
+            shrinkAxisMask
+        };
+        for (let i = 0; i < sparseSpec.dims; i++) {
+            if (ellipsisSeen && ((1 << i) & newAxisMask) !== 0) {
+                sparseSpec.numAddAxisAfterEllipsis++;
+            }
+            if ((1 << i) & ellipsisMask) {
+                ellipsisSeen = true;
+            }
         }
-        if (ellipsisMask !== 0 && shrinkAxisMask !== 0) {
-            throw new Error('Using both ellipsisMask and shrinkAxisMask is not yet supported.');
+        // If no ellipsis insert one at the end.
+        if (!ellipsisSeen) {
+            sparseSpec.ellipsisMask |= (1 << sparseSpec.dims);
+            sparseSpec.dims++; // this effects loop iteration below
         }
-        const numInterpolatedAxes = xShape.length - $begin.length;
-        // Expand the dims of x based on the newAxisMask.
-        const expandAxes = maskToAxes(newAxisMask);
-        const newShape = xShape.slice();
-        expandAxes.forEach(axis => {
-            $begin[axis] = 0;
-            $end[axis] = 1;
-            newShape.splice(axis, 0, 1);
-        });
-        const { begin: normalizedBegin, end: normalizedEnd, strides: normalizedStrides } = getNormalizedAxes(newShape, ellipsisAxes, numInterpolatedAxes, $begin, $end, $strides, beginMask, endMask, ellipsisMask);
-        $begin = normalizedBegin;
-        $end = normalizedEnd;
-        $strides = normalizedStrides;
-        const shrinkAxes = maskToAxes(shrinkAxisMask);
-        // Adjust the ends based on the shrink mask.
-        shrinkAxes.forEach(axis => {
-            $end[axis] = $begin[axis] + 1;
-            $strides[axis] = 1;
-        });
-        // Figure out the output shape.
-        const size = computeOutShape$2($begin, $end, $strides);
-        // Remove the axes based on shrinkMask.
-        const outShape = size.filter((_, axis) => shrinkAxes.indexOf(axis) === -1);
-        const nonStrided = $strides.every(v => v === 1);
-        return { nonStrided, $begin, $end, $strides, size, newShape, outShape };
+        // Step 2: Make a sparse spec into a full index spec.
+        //
+        // The sparse spec deos not correspond to the number of dimensions.
+        // Make a dense spec that cooresponds to the number of dimensions.
+        //
+        // For example suppose foo[...,3:] on foo.shape = [2, 2, 3] then we need to
+        // produce the missing beginMask for the first two dimensions i.e. from
+        // beginMaskSpec = 0, endMaskSpec = 2, we achieve beginMask = 6 (110),
+        // endMask = 7 (111).
+        const denseSpec = {
+            dims: xShape.length,
+            beginMask: 0,
+            endMask: 0,
+            beginValid: false,
+            endValid: false
+        };
+        buildDenseSpec(sparseSpec, denseSpec);
+        // Step 3: Make implicit ranges (non-zero beginMasks and endMasks) explicit
+        // and bounds check.
+        let isIdentity = true;
+        let sliceDim0 = true;
+        let isSimpleSlice = true;
+        const processingShape = [];
+        const finalShape = [];
+        for (let i = 0; i < xShape.length; ++i) {
+            if (denseSpec.strides[i] === 0) {
+                throw Error(`strides[${i}] must be non-zero`);
+            }
+            const shrinkI = !!(denseSpec.shrinkAxisMask & (1 << i));
+            const dimI = xShape[i];
+            if (dimI === -1) {
+                processingShape.push(shrinkI ? 1 : -1);
+                continue;
+            }
+            const masks = [denseSpec.beginMask & (1 << i), denseSpec.endMask & (1 << i)];
+            const validRange = [
+                denseSpec.strides[i] > 0 ? 0 : -1,
+                denseSpec.strides[i] > 0 ? dimI : dimI - 1
+            ];
+            if (shrinkI && denseSpec.strides[i] <= 0) {
+                throw Error('only stride 1 allowed on non-range indexing.');
+            }
+            isSimpleSlice = isSimpleSlice && (denseSpec.strides[i] === 1);
+            const beginAndEndMasked = !!((denseSpec.beginMask & (1 << i)) && (denseSpec.endMask & (1 << i)));
+            if (denseSpec.beginValid && denseSpec.endValid) {
+                if (shrinkI) {
+                    // If we are shrinking, the end index is now possibly incorrect. In
+                    // particular foo[-1] produces sparseBegin = -1, sparseEnd = 0.
+                    // and canonical puts these to n-1 and 0, which implies a degenerate
+                    // interval. Fortunately, it is now safe to re-create end as begin + 1.
+                    const xFwd = denseSpec.begin[i] < 0 ? dimI + denseSpec.begin[i] :
+                        denseSpec.begin[i];
+                    denseSpec.begin[i] = xFwd;
+                    denseSpec.end[i] = denseSpec.begin[i] + 1;
+                    if (xFwd < 0 || xFwd >= dimI) {
+                        throw Error(`slice index ${denseSpec.begin[i]} of dimension ${i} out of bounds.`);
+                    }
+                }
+                else {
+                    denseSpec.begin[i] = canonical(denseSpec.begin[i], 0, denseSpec.strides[i], dimI, masks, validRange);
+                    denseSpec.end[i] = canonical(denseSpec.end[i], 1, denseSpec.strides[i], dimI, masks, validRange);
+                }
+                // Update optimization values
+                const takeAllInDimension = denseSpec.strides[i] === 1 &&
+                    denseSpec.begin[i] === 0 && denseSpec.end[i] === dimI;
+                isIdentity = isIdentity && takeAllInDimension;
+                sliceDim0 = sliceDim0 &&
+                    ((i === 0 && denseSpec.strides[i] === 1) || takeAllInDimension);
+            }
+            else {
+                isIdentity =
+                    isIdentity && ((denseSpec.strides[i] === 1) && beginAndEndMasked);
+                sliceDim0 = sliceDim0 &&
+                    ((i === 0 && denseSpec.strides[i] === 1) || beginAndEndMasked);
+            }
+            // Compute the processing shape (the intermediate Eigen will produce)
+            let intervalLength;
+            let knownInterval = false;
+            if (denseSpec.beginValid && denseSpec.endValid) {
+                intervalLength = denseSpec.end[i] - denseSpec.begin[i];
+                knownInterval = true;
+            }
+            else if (shrinkI) {
+                // The dimension is still known as 1 for the processingShape, but will be
+                // discarded for the final shape.
+                intervalLength = 1;
+                knownInterval = true;
+            }
+            else if (beginAndEndMasked) {
+                // Even if we don't have values for begin or end, we do know that this
+                // dimension covers the whole interval. If we have shape information for
+                // this dimension, that tells us the interval length.
+                if (dimI >= 0) {
+                    if (denseSpec.strides[i] < 0) {
+                        intervalLength = -dimI;
+                    }
+                    else {
+                        intervalLength = dimI;
+                    }
+                    knownInterval = true;
+                }
+            }
+            if (knownInterval) {
+                let sizeI;
+                // Hold zero if the interval is degenerate, otherwise account for
+                // remainder
+                if (intervalLength === 0 ||
+                    ((intervalLength < 0) !== (denseSpec.strides[i] < 0))) {
+                    sizeI = 0;
+                }
+                else {
+                    sizeI = Math.trunc(intervalLength / denseSpec.strides[i]) +
+                        (intervalLength % denseSpec.strides[i] !== 0 ? 1 : 0);
+                }
+                processingShape.push(sizeI);
+            }
+            else {
+                processingShape.push(-1);
+            }
+        }
+        // Step 4: Compute the final shape
+        //
+        // newAxis will increase dimension by 1 (with a one-size dimension)
+        // slices like foo[3, ...] will reduce dimension by 1.
+        // This cannot be done earlier, because it depends on Step 3.
+        for (let denseDim = 0; denseDim < denseSpec.finalShapeGatherIndices.length; ++denseDim) {
+            const gatherIndex = denseSpec.finalShapeGatherIndices[denseDim];
+            if (gatherIndex >= 0) {
+                finalShape.push(processingShape[gatherIndex]);
+            }
+            else if (gatherIndex === NEW_AXIS) {
+                finalShape.push(1);
+            }
+        }
+        const finalShapeSparse = finalShape.filter((dim, i) => denseSpec.finalShapeGatherIndices[i] !== NEW_AXIS);
+        return {
+            finalShapeSparse,
+            finalShape,
+            isIdentity,
+            sliceDim0,
+            isSimpleSlice,
+            begin: denseSpec.begin,
+            end: denseSpec.end,
+            strides: denseSpec.strides
+        };
+    }
+    function buildDenseSpec(sparse, dense) {
+        dense.beginMask = 0;
+        dense.endMask = 0;
+        dense.shrinkAxisMask = 0;
+        let fullIndex = 0;
+        dense.beginValid = sparse.begin != null;
+        dense.endValid = sparse.end != null;
+        dense.begin = new Array(dense.dims);
+        dense.end = new Array(dense.dims);
+        dense.strides = new Array(dense.dims);
+        dense.finalShapeGatherIndices = [];
+        dense.finalShapeGatherIndicesSparse = [];
+        dense.inputShapeGatherIndicesSparse = new Array(dense.dims);
+        for (let i = 0; i < sparse.dims; i++) {
+            if ((1 << i) & sparse.ellipsisMask) {
+                // Only the bit that has ellipsis will fall in this condition.
+                // Expand the ellipsis into the appropriate indices
+                // Note: this only works because we guaranteed one ellipsis.
+                const nextIndex = Math.min(dense.dims - (sparse.dims - i) + 1 + sparse.numAddAxisAfterEllipsis, dense.dims);
+                for (; fullIndex < nextIndex; fullIndex++) {
+                    // newAxis aren't real axis so you have to skip.
+                    dense.begin[fullIndex] = 0;
+                    dense.end[fullIndex] = 0;
+                    dense.strides[fullIndex] = 1;
+                    dense.beginMask |= (1 << fullIndex);
+                    dense.endMask |= (1 << fullIndex);
+                    dense.finalShapeGatherIndices.push(fullIndex);
+                    dense.finalShapeGatherIndicesSparse.push(-1);
+                    dense.inputShapeGatherIndicesSparse[fullIndex] = i;
+                }
+            }
+            else if ((1 << i) & sparse.newAxisMask) {
+                // Only the bit that has newAxis will fall in this condition.
+                dense.finalShapeGatherIndices.push(NEW_AXIS);
+                dense.finalShapeGatherIndicesSparse.push(-1);
+            }
+            else {
+                if (fullIndex === dense.begin.length) {
+                    throw Error(`Index out of range using input dim ${fullIndex}; input ` +
+                        `has only ${dense.dims} dims, ${dense.begin.length}.`);
+                }
+                // Gather slicing spec into appropriate index.
+                if (sparse.begin != null) {
+                    dense.begin[fullIndex] = sparse.begin[i];
+                }
+                if (sparse.end != null) {
+                    dense.end[fullIndex] = sparse.end[i];
+                }
+                dense.strides[fullIndex] = sparse.strides[i];
+                if (sparse.beginMask & (1 << i)) {
+                    dense.beginMask |= (1 << fullIndex);
+                }
+                if (sparse.endMask & (1 << i)) {
+                    dense.endMask |= (1 << fullIndex);
+                }
+                // If shrink, record where to get the dimensionality from (i.e. newAxis)
+                // creates a fake 1 size dimension. Also remember shrink axis (now in
+                // dense form) so we can ignore dense.end below.
+                if (sparse.shrinkAxisMask & (1 << i)) {
+                    dense.finalShapeGatherIndices.push(SHRINK_AXIS);
+                    dense.finalShapeGatherIndicesSparse.push(-1);
+                    dense.shrinkAxisMask |= (1 << fullIndex);
+                }
+                else {
+                    dense.finalShapeGatherIndices.push(fullIndex);
+                    // Remember that where in the sparse shape the dense dim comes from.
+                    dense.finalShapeGatherIndicesSparse.push(i);
+                }
+                dense.inputShapeGatherIndicesSparse[fullIndex] = i;
+                fullIndex++;
+            }
+        }
+    }
+    function canonical(x, c, strideI, dimI, masks, validRange) {
+        if (masks[c]) {
+            return strideI > 0 ? validRange[c] : validRange[(c + 1) & 1];
+        }
+        else {
+            const xFwd = x < 0 ? dimI + x : x; // make negative indices positive
+            return xFwd < validRange[0] ? validRange[0] :
+                xFwd > validRange[1] ? validRange[1] : xFwd;
+        }
     }
 
     var slice_util = /*#__PURE__*/Object.freeze({
@@ -9542,7 +9797,7 @@
 
     /** @license See the LICENSE file. */
     // This code is auto-generated, do not modify this file!
-    const version = '3.9.0';
+    const version = '3.11.0';
 
     /**
      * @license
@@ -11339,7 +11594,7 @@
      * @doc {heading: 'Operations', subheading: 'Basic math'}
      */
     function sigmoid_(x) {
-        const $x = convertToTensor(x, 'x', 'sigmoid');
+        const $x = convertToTensor(x, 'x', 'sigmoid', 'float32');
         const inputs = { x: $x };
         return ENGINE.runKernel(Sigmoid, inputs);
     }
@@ -11435,7 +11690,7 @@
      * @doc {heading: 'Operations', subheading: 'Basic math'}
      */
     function tanh_(x) {
-        const $x = convertToTensor(x, 'x', 'tanh');
+        const $x = convertToTensor(x, 'x', 'tanh', 'float32');
         const inputs = { x: $x };
         return ENGINE.runKernel(Tanh, inputs);
     }
@@ -11982,7 +12237,7 @@
      * @doc {heading: 'Operations', subheading: 'Basic math'}
      */
     function ceil_(x) {
-        const $x = convertToTensor(x, 'x', 'ceil');
+        const $x = convertToTensor(x, 'x', 'ceil', 'float32');
         const inputs = { x: $x };
         return ENGINE.runKernel(Ceil, inputs);
     }
@@ -12174,8 +12429,8 @@
      * @doc {heading: 'Operations', subheading: 'Convolution'}
      */
     function conv2d_(x, filter, strides, pad, dataFormat = 'NHWC', dilations = [1, 1], dimRoundingMode) {
-        const $x = convertToTensor(x, 'x', 'conv2d');
-        const $filter = convertToTensor(filter, 'filter', 'conv2d');
+        const $x = convertToTensor(x, 'x', 'conv2d', 'float32');
+        const $filter = convertToTensor(filter, 'filter', 'conv2d', 'float32');
         let x4D = $x;
         let reshapedTo4D = false;
         if ($x.rank === 3) {
@@ -12566,12 +12821,12 @@
      *
      * x.cos().print();  // or tf.cos(x)
      * ```
-     * @param x The input tensor.
+     * @param x The input tensor. Must be float32 type.
      *
      * @doc {heading: 'Operations', subheading: 'Basic math'}
      */
     function cos_(x) {
-        const $x = convertToTensor(x, 'x', 'cos');
+        const $x = convertToTensor(x, 'x', 'cos', 'float32');
         const inputs = { x: $x };
         return ENGINE.runKernel(Cos, inputs);
     }
@@ -12601,12 +12856,12 @@
      *
      * x.cosh().print();  // or tf.cosh(x)
      * ```
-     * @param x The input tensor.
+     * @param x The input tensor. Must be float32 type.
      *
      * @doc {heading: 'Operations', subheading: 'Basic math'}
      */
     function cosh_(x) {
-        const $x = convertToTensor(x, 'x', 'cosh');
+        const $x = convertToTensor(x, 'x', 'cosh', 'float32');
         const inputs = { x: $x };
         return ENGINE.runKernel(Cosh, inputs);
     }
@@ -12765,10 +13020,11 @@
      * @doc {heading: 'Tensors', subheading: 'Transformations'}
      */
     function depthToSpace_(x, blockSize, dataFormat = 'NHWC') {
-        const $x = convertToTensor(x, 'x', 'depthToSpace');
+        const $x = convertToTensor(x, 'x', 'depthToSpace', 'float32');
         const inputHeight = (dataFormat === 'NHWC') ? $x.shape[1] : $x.shape[2];
         const inputWidth = (dataFormat === 'NHWC') ? $x.shape[2] : $x.shape[3];
         const inputDepth = (dataFormat === 'NHWC') ? $x.shape[3] : $x.shape[1];
+        assert(blockSize > 1, () => `blockSize should be > 1 for depthToSpace, but was: ${blockSize}`);
         assert(inputHeight * blockSize >= 0, () => `Negative dimension size caused by overflow when multiplying
     ${inputHeight} and ${blockSize}  for depthToSpace with input shape
     ${$x.shape}`);
@@ -12844,8 +13100,8 @@
      * @doc {heading: 'Operations', subheading: 'Convolution'}
      */
     function depthwiseConv2d_(x, filter, strides, pad, dataFormat = 'NHWC', dilations = [1, 1], dimRoundingMode) {
-        const $x = convertToTensor(x, 'x', 'depthwiseConv2d');
-        const $filter = convertToTensor(filter, 'filter', 'depthwiseConv2d');
+        const $x = convertToTensor(x, 'x', 'depthwiseConv2d', 'float32');
+        const $filter = convertToTensor(filter, 'filter', 'depthwiseConv2d', 'float32');
         let x4D = $x;
         let reshapedTo4D = false;
         if ($x.rank === 3) {
@@ -12905,7 +13161,7 @@
      * tf.diag(x).print()
      * ```
      * ```js
-     * const x = tf.tensor1d([1, 2, 3, 4, 5, 6, 6, 8], [4, 2])
+     * const x = tf.tensor2d([1, 2, 3, 4, 5, 6, 6, 8], [4, 2])
      *
      * tf.diag(x).print()
      * ```
@@ -13466,7 +13722,7 @@
      * @doc {heading: 'Operations', subheading: 'Basic math'}
      */
     function elu_(x) {
-        const $x = convertToTensor(x, 'x', 'elu');
+        const $x = convertToTensor(x, 'x', 'elu', 'float32');
         const inputs = { x: $x };
         return ENGINE.runKernel(Elu, inputs);
     }
@@ -13805,7 +14061,7 @@
      * @doc {heading: 'Operations', subheading: 'Basic math'}
      */
     function floor_(x) {
-        const $x = convertToTensor(x, 'x', 'floor');
+        const $x = convertToTensor(x, 'x', 'floor', 'float32');
         const inputs = { x: $x };
         return ENGINE.runKernel(Floor, inputs);
     }
@@ -14329,7 +14585,7 @@
      * @doc {heading: 'Operations', subheading: 'Basic math'}
      */
     function log_(x) {
-        const $x = convertToTensor(x, 'x', 'log');
+        const $x = convertToTensor(x, 'x', 'log', 'float32');
         const inputs = { x: $x };
         return ENGINE.runKernel(Log, inputs);
     }
@@ -17608,7 +17864,7 @@
      * @doc {heading: 'Operations', subheading: 'Basic math'}
      */
     function rsqrt_(x) {
-        const $x = convertToTensor(x, 'x', 'rsqrt');
+        const $x = convertToTensor(x, 'x', 'rsqrt', 'float32');
         const inputs = { x: $x };
         return ENGINE.runKernel(Rsqrt, inputs);
     }
@@ -17919,7 +18175,7 @@
      * @doc {heading: 'Operations', subheading: 'Basic math'}
      */
     function sin_(x) {
-        const $x = convertToTensor(x, 'x', 'sin');
+        const $x = convertToTensor(x, 'x', 'sin', 'float32');
         const inputs = { x: $x };
         return ENGINE.runKernel(Sin, inputs);
     }
@@ -18426,7 +18682,7 @@
      * @doc {heading: 'Operations', subheading: 'Basic math'}
      */
     function sqrt_(x) {
-        const $x = convertToTensor(x, 'x', 'sqrt');
+        const $x = convertToTensor(x, 'x', 'sqrt', 'float32');
         const inputs = { x: $x };
         return ENGINE.runKernel(Sqrt, inputs);
     }
@@ -18695,7 +18951,7 @@
      * @doc {heading: 'Operations', subheading: 'Basic math'}
      */
     function tan_(x) {
-        const $x = convertToTensor(x, 'x', 'tan');
+        const $x = convertToTensor(x, 'x', 'tan', 'float32');
         const inputs = { x: $x };
         return ENGINE.runKernel(Tan, inputs);
     }
@@ -20230,8 +20486,8 @@
             }
             return applyActivation(result, activation, preluActivationWeights, leakyreluAlpha);
         }
-        const $x = convertToTensor(x, 'x', 'conv2d');
-        const $filter = convertToTensor(filter, 'filter', 'conv2d');
+        const $x = convertToTensor(x, 'x', 'conv2d', 'float32');
+        const $filter = convertToTensor(filter, 'filter', 'conv2d', 'float32');
         let x4D = $x;
         let reshapedTo4D = false;
         if ($x.rank === 3) {
@@ -20465,8 +20721,8 @@
             }
             return applyActivation(result, activation, preluActivationWeights, leakyreluAlpha);
         }
-        const $x = convertToTensor(x, 'x', 'depthwiseConv2d');
-        const $filter = convertToTensor(filter, 'filter', 'depthwiseConv2d');
+        const $x = convertToTensor(x, 'x', 'depthwiseConv2d', 'float32');
+        const $filter = convertToTensor(filter, 'filter', 'depthwiseConv2d', 'float32');
         let x4D = $x;
         let reshapedTo4D = false;
         if ($x.rank === 3) {
@@ -21143,8 +21399,8 @@
      * @doc {heading: 'Operations', subheading: 'Images', namespace: 'image'}
      */
     function nonMaxSuppression_(boxes, scores, maxOutputSize, iouThreshold = 0.5, scoreThreshold = Number.NEGATIVE_INFINITY) {
-        const $boxes = convertToTensor(boxes, 'boxes', 'nonMaxSuppression');
-        const $scores = convertToTensor(scores, 'scores', 'nonMaxSuppression');
+        const $boxes = convertToTensor(boxes, 'boxes', 'nonMaxSuppression', 'float32');
+        const $scores = convertToTensor(scores, 'scores', 'nonMaxSuppression', 'float32');
         const inputs = nonMaxSuppSanityCheck($boxes, $scores, maxOutputSize, iouThreshold, scoreThreshold);
         maxOutputSize = inputs.maxOutputSize;
         iouThreshold = inputs.iouThreshold;
@@ -25412,6 +25668,7 @@
 
     var index$2 = /*#__PURE__*/Object.freeze({
         __proto__: null,
+        OptimizerConstructors: OptimizerConstructors,
         AdadeltaOptimizer: AdadeltaOptimizer,
         AdagradOptimizer: AdagradOptimizer,
         AdamOptimizer: AdamOptimizer,
@@ -26408,9 +26665,9 @@
     function normalize$1(x, meanRgb) {
         return tidy(function () {
             var r = meanRgb[0], g = meanRgb[1], b = meanRgb[2];
-            var avg_r = fill(__spreadArrays(x.shape.slice(0, 3), [1]), r);
-            var avg_g = fill(__spreadArrays(x.shape.slice(0, 3), [1]), g);
-            var avg_b = fill(__spreadArrays(x.shape.slice(0, 3), [1]), b);
+            var avg_r = fill(__spreadArrays(x.shape.slice(0, 3), [1]), r, x.dtype);
+            var avg_g = fill(__spreadArrays(x.shape.slice(0, 3), [1]), g, x.dtype);
+            var avg_b = fill(__spreadArrays(x.shape.slice(0, 3), [1]), b, x.dtype);
             var avg_rgb = concat([avg_r, avg_g, avg_b], 3);
             return sub(x, avg_rgb);
         });
@@ -26437,7 +26694,7 @@
             var createPaddingTensor = function (paddingAmount) {
                 var paddingTensorShape = imgTensor.shape.slice();
                 paddingTensorShape[paddingAxis] = paddingAmount;
-                return fill(paddingTensorShape, 0);
+                return fill(paddingTensorShape, 0, imgTensor.dtype);
             };
             var paddingTensorAppend = createPaddingTensor(paddingAmount);
             var remainingPaddingAmount = dimDiff - paddingTensorAppend.shape[paddingAxis];
@@ -28726,8 +28983,8 @@
             return tidy(function () {
                 var createInterleavedTensor = function (fillX, fillY) {
                     return as1D(as2D(stack([
-                        fill([68], fillX),
-                        fill([68], fillY)
+                        fill([68], fillX, output.dtype),
+                        fill([68], fillY, output.dtype)
                     ], 1), 1, 136));
                 };
                 var getPadding = function (batchIdx, cond) {
@@ -28736,7 +28993,7 @@
                 };
                 var getPaddingX = function (batchIdx) { return getPadding(batchIdx, function (w, h) { return w < h; }); };
                 var getPaddingY = function (batchIdx) { return getPadding(batchIdx, function (w, h) { return h < w; }); };
-                var landmarkTensors = div(sub(mul(output, fill([batchSize, 136], inputSize)), stack(Array.from(Array(batchSize), function (_, batchIdx) {
+                var landmarkTensors = div(sub(mul(output, fill([batchSize, 136], inputSize, output.dtype)), stack(Array.from(Array(batchSize), function (_, batchIdx) {
                     return createInterleavedTensor(getPaddingX(batchIdx), getPaddingY(batchIdx));
                 }))), stack(Array.from(Array(batchSize), function (_, batchIdx) {
                     return createInterleavedTensor(inputDimensions[batchIdx].width, inputDimensions[batchIdx].height);

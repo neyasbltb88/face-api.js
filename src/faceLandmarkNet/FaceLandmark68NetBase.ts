@@ -29,8 +29,8 @@ export abstract class FaceLandmark68NetBase<
     return tf.tidy(() => {
       const createInterleavedTensor = (fillX: number, fillY: number) =>
         as1D(as2D(tf.stack([
-          tf.fill([68], fillX),
-          tf.fill([68], fillY)
+          tf.fill([68], fillX, output.dtype),
+          tf.fill([68], fillY, output.dtype)
         ], 1), 1, 136))
 
       const getPadding = (batchIdx: number, cond: (w: number, h: number) => boolean): number => {
@@ -42,7 +42,7 @@ export abstract class FaceLandmark68NetBase<
 
       const landmarkTensors = div(
         sub(
-          mul(output, tf.fill([batchSize, 136], inputSize)),
+          mul(output, tf.fill([batchSize, 136], inputSize, output.dtype)),
           tf.stack(Array.from(Array(batchSize), (_, batchIdx) =>
             createInterleavedTensor(
               getPaddingX(batchIdx),
