@@ -1,12 +1,12 @@
 import * as tf from '@tensorflow/tfjs-core'
 
-export function nonMaxSuppression(
+export async function nonMaxSuppression(
   boxes: tf.Tensor2D,
   scores: number[],
   maxOutputSize: number,
   iouThreshold: number,
   scoreThreshold: number
-): number[] {
+): Promise<number[]> {
 
   const numBoxes = boxes.shape[0]
   const outputSize = Math.min(
@@ -23,14 +23,14 @@ export function nonMaxSuppression(
 
   const selected: number[] = []
 
-  candidates.forEach(c => {
+  for (const c of candidates) {
     if (selected.length >= outputSize) {
-      return
+      continue;
     }
     const originalScore = c.score
 
     for (let j = selected.length - 1; j >= 0; --j) {
-      const iou = IOU(boxes, c.boxIndex, selected[j])
+      const iou = IOU(await boxes.array(), c.boxIndex, selected[j])
       if (iou === 0.0) {
         continue
       }
@@ -43,13 +43,12 @@ export function nonMaxSuppression(
     if (originalScore === c.score) {
       selected.push(c.boxIndex)
     }
-  })
+  }
 
   return selected
 }
 
-function IOU(boxes: tf.Tensor2D, i: number, j: number) {
-  const boxesData = boxes.arraySync()
+function IOU(boxesData: number[][], i: number, j: number) {
   const yminI = Math.min(boxesData[i][0], boxesData[i][2])
   const xminI = Math.min(boxesData[i][1], boxesData[i][3])
   const ymaxI = Math.max(boxesData[i][0], boxesData[i][2])

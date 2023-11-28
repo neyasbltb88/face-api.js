@@ -75,7 +75,7 @@ export class SsdMobilenetv1 extends NeuralNetwork<NetParams> {
     const scoresData = Array.from(await scores.data())
 
     const iouThreshold = 0.5
-    const indices = nonMaxSuppression(
+    const indices = await nonMaxSuppression(
       boxes,
       scoresData,
       maxResults,

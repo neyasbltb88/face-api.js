@@ -20,7 +20,7 @@ function rescaleAndNormalize(x: tf.Tensor4D, scale: number): tf.Tensor4D {
   })
 }
 
-function extractBoundingBoxes(
+async function extractBoundingBoxes(
   scoresTensor: tf.Tensor2D,
   regionsTensor: tf.Tensor3D,
   scale: number,
@@ -29,7 +29,7 @@ function extractBoundingBoxes(
 
   // TODO: fix this!, maybe better to use tf.gather here
   const indices: Point[] = []
-  const scoresData = scoresTensor.arraySync();
+  const scoresData = await scoresTensor.array();
   for (let y = 0; y < scoresTensor.shape[0]; y++) {
     for (let x = 0; x < scoresTensor.shape[1]; x++) {
       if (scoresData[y][x] >= scoreThreshold) {
@@ -38,7 +38,7 @@ function extractBoundingBoxes(
     }
   }
 
-  const boundingBoxes = indices.map(idx => {
+  const boundingBoxes = await Promise.all(indices.map(async idx => {
     const cell = new BoundingBox(
       Math.round((idx.y * CELL_STRIDE + 1) / scale),
       Math.round((idx.x * CELL_STRIDE + 1) / scale),
@@ -48,7 +48,7 @@ function extractBoundingBoxes(
 
     const score = scoresData[idx.y][idx.x]
 
-    const regionsData = regionsTensor.arraySync()
+    const regionsData = await regionsTensor.array()
     const region = new MtcnnBox(
       regionsData[idx.y][idx.x][0],
       regionsData[idx.y][idx.x][1],
@@ -61,12 +61,12 @@ function extractBoundingBoxes(
       score,
       region
     }
-  })
+  }));
 
   return boundingBoxes
 }
 
-export function stage1(
+export async function stage1(
   imgTensor: tf.Tensor4D,
   scales: number[],
   scoreThreshold: number,
@@ -94,8 +94,8 @@ export function stage1(
     }
   }))
 
-  const boxesForScale = pnetOutputs.map(({ scoresTensor, regionsTensor, scale, statsForScale }) => {
-    const boundingBoxes = extractBoundingBoxes(
+  const boxesForScale = await Promise.all(pnetOutputs.map(async ({ scoresTensor, regionsTensor, scale, statsForScale }) => {
+    const boundingBoxes = await extractBoundingBoxes(
       scoresTensor,
       regionsTensor,
       scale,
@@ -121,7 +121,7 @@ export function stage1(
 
     stats.stage1.push(statsForScale)
     return indices.map(boxIdx => boundingBoxes[boxIdx])
-  })
+  }));
 
   const allBoxes = boxesForScale.reduce(
     (all, boxes) => all.concat(boxes), []

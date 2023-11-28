@@ -55,8 +55,8 @@ export async function stage2(
     )
     stats.stage2_nms = Date.now() - ts
 
-    const regions = indicesNms.map(idx =>{
-        const regionsData = rnetOuts[indices[idx]].regions.arraySync()
+    const regions = await Promise.all(indicesNms.map(async idx =>{
+        const regionsData = await rnetOuts[indices[idx]].regions.array()
         return new MtcnnBox(
           regionsData[0][0],
           regionsData[0][1],
@@ -64,7 +64,7 @@ export async function stage2(
           regionsData[0][3]
         )
       }
-    )
+    ));
 
     finalScores = indicesNms.map(idx => filteredScores[idx])
     finalBoxes = indicesNms.map((idx, i) => filteredBoxes[idx].calibrate(regions[i]))
