@@ -36,5 +36,5 @@ export function createNodejsEnv(): Environment {
     createImageElement,
     fetch,
     ...fileSystem
-  }
+  } as any;
 }

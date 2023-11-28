@@ -88,7 +88,7 @@ export class SsdMobilenetv1 extends NeuralNetwork<NetParams> {
     const padX = inputSize / reshapedDims.width
     const padY = inputSize / reshapedDims.height
 
-    const boxesData = boxes.arraySync()
+    const boxesData = await boxes.array()
     const results = indices
       .map(idx => {
         const [top, bottom] = [
@@ -120,7 +120,7 @@ export class SsdMobilenetv1 extends NeuralNetwork<NetParams> {
     return results
   }
 
-  protected getDefaultModelName(): string {
+  getDefaultModelName(): string {
     return 'ssd_mobilenetv1_model'
   }
 
