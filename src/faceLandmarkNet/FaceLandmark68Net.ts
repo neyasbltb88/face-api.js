@@ -8,7 +8,7 @@ export class FaceLandmark68Net extends FaceLandmark68NetBase<FaceFeatureExtracto
     super('FaceLandmark68Net', faceFeatureExtractor)
   }
 
-  protected getDefaultModelName(): string {
+  getDefaultModelName(): string {
     return 'face_landmark_68_model'
   }
 
