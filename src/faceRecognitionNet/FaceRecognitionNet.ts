@@ -81,7 +81,7 @@ export class FaceRecognitionNet extends NeuralNetwork<NetParams> {
       : faceDescriptorsForBatch[0]
   }
 
-  protected getDefaultModelName(): string {
+  getDefaultModelName(): string {
     return 'face_recognition_model'
   }
 
