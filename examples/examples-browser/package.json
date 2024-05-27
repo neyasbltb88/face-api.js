@@ -2,7 +2,7 @@
   "scripts": {
     "start": "node server.js"
   },
-  "author": "neyasbltb88 <neyasbltb_88@mail.ru>",
+  "author": "neyasbltb_88 <neyasbltb_88@mail.ru>",
   "license": "MIT",
   "dependencies": {
     "express": "^4.17.1",

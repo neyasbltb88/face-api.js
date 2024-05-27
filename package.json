@@ -1,5 +1,5 @@
 {
-  "name": "@neyasbltb88/face-api.js",
+  "name": "@neyasbltb_88/face-api.js",
   "version": "0.22.4",
   "private": false,
   "description": "JavaScript API for face detection and face recognition in the browser with tensorflow.js",
@@ -32,11 +32,11 @@
     "tensorflow",
     "tf"
   ],
-  "author": "neyasbltb88 <neyasbltb_88@mail.ru>",
+  "author": "neyasbltb_88 <neyasbltb_88@mail.ru>",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/neyasbltb88/face-api.js"
+    "url": "git+https://github.com/neyasbltb_88/face-api.js"
   },
   "dependencies": {
     "@tensorflow/tfjs-backend-webgl": "^4.19.0",
