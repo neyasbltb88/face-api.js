@@ -1,4 +1,7 @@
 import * as tf from '@tensorflow/tfjs-core';
+import '@tensorflow/tfjs-backend-webgl';
+
+tf.setBackend('webgl')
 
 import * as draw from './draw';
 import * as utils from './utils';
