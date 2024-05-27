@@ -1,6 +1,6 @@
 {
   "name": "@neyasbltb_88/face-api.js",
-  "version": "0.22.4",
+  "version": "0.22.5",
   "private": false,
   "description": "JavaScript API for face detection and face recognition in the browser with tensorflow.js",
   "module": "./build/es6/index.js",
