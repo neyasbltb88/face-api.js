@@ -36,7 +36,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/neyasbltb_88/face-api.js"
+    "url": "git+https://github.com/neyasbltb88/face-api.js"
   },
   "dependencies": {
     "@tensorflow/tfjs-backend-webgl": "^4.19.0",
